@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Model weights: the released checkpoints under checkpoints/ (benchmark and
+# deployment) are tracked (see checkpoints/README.md); keep other weights out
+# of git
+checkpoints/**/*.pth
+checkpoints/**/*_eval_*.json
+converted_onnx/
+
+# SMPL-X body models - restricted license, never commit
+body_models/
+*.npz
+*.pkl
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Paper drafts and internal material
+refs/
+
+# Training data (preprocessed AMASS) and experiment outputs
+data/
+experiments/
+slurm_logs/

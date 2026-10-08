@@ -1,0 +1,4 @@
+# Created by setup.sh and prepare_smplx.py
+third_party/
+weights/
+body_models/

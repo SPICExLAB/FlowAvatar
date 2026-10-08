@@ -1,0 +1,5 @@
+# Loss ablation (paper Table 3): no hand alignment loss
+base: ../gru_smplh.yaml
+name: ablation_no_hand
+loss:
+  hand_alignment: 0.0

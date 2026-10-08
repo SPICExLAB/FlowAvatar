@@ -1,0 +1,15 @@
+# Deployment on-device model: the configuration of checkpoints/LSTM/baseline.pt
+# (Unity Sentis export). Neutral SMPL-X, 10 betas, per-region heads,
+# 1-layer unidirectional LSTM, 20-frame windows at 30 fps.
+base: lstm_smplh.yaml
+name: lstm_smplx
+
+data:
+  root: data/amass_smplx_30fps  # `python -m training.prepare_data --fps 30 --body_model smplx`
+
+body_model:
+  file: null                    # = $SMPLX_MODEL_PATH or body_models/smplx/SMPLX_NEUTRAL.npz
+  num_betas: 10
+
+model:
+  unified_predictor: false

@@ -1,0 +1,33 @@
+# Unity-generated
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+.vsconfig
+
+# Builds
+*.apk
+*.aab
+
+# SMPL-X files (MPI-IS license): each user installs them with
+# FlowAvatar > Install SMPL-X Files (see Assets/SMPLX-OVR/README.md)
+/Assets/SMPLX-OVR/*
+!/Assets/SMPLX-OVR/README.md
+!/Assets/SMPLX-OVR/README.md.meta

@@ -1,0 +1,110 @@
+# FlowAvatar avatar pipeline, HAHA texture fitting.
+# Stage 1: no optimisation, renders the initial SMPL-X fit (val/rasterization)
+# next to the frames (val/rgb_image) as references for scripts/align_faces.py.
+logdir: ./logs
+flush_log_secs: 120
+log_every_n_steps: 10
+val_check_interval: 1.0
+
+runner:
+  target: runners.train_gaussians.TextureAndGaussianTrainer
+  params:
+    gender: "neutral"
+    lr_texture: 0.01
+    color_lr: 0.005
+    position_lr: 0.00016
+    final_position_lr: 0.0000016
+    opacity_lr: 0.05
+    scaling_lr: 0.005
+    rotation_lr: 0.005
+    pose_lr: 0.0002
+    min_s_value: 0.0
+    max_s_value: 0.1
+
+    gaussians_optimize_steps: 3000
+    texture_optimize_steps: 0
+    opacity_optimize_steps: 5000
+
+    densify_start: 100
+    densify_step: 201
+    densify_stop: 2500
+
+    prune_start: 0
+    prune_step: 201
+    prune_stop: 100000
+
+    render_width: 720
+    render_height: 1280
+    texture_size: 512
+    smplx_path: ../../body_models  # relative to third_party/HAHA
+    use_pca_for_hands: False
+
+    criteria_config:
+      l2_loss:
+        target: criteria.l2_loss.L2Loss
+        params:
+          weight: 1.
+
+      perceptual_loss:
+        target: criteria.perceptual_loss.PerceptualLoss
+        params:
+          weight: 0.02
+
+      ssim_loss:
+        target: criteria.ssim_loss.SSIMLoss
+        params:
+          weight: 0.2
+
+      sobel_loss:
+        target: criteria.sobel_loss.SobelLoss
+        params:
+          weight: 1.0
+
+      segmentation_loss:
+        target: criteria.dice_loss.DiceLoss
+        params:
+          weight: 0.1
+
+      tv_loss:
+        target: criteria.tv_loss.TVLoss
+        params:
+          weight: 0.05
+
+train_dataloader:
+  batch_size: 4
+  num_workers: 4
+  target: dataloaders.smplx_loader.DataLoader
+  params:
+    apply_mask: False
+    use_hashing: False
+    render_width: 720
+    render_height: 1280
+    random_background: True
+    data_root: null  # set from --vid_path by main.py
+
+val_dataloader:
+  batch_size: 1
+  num_workers: 1
+  target: dataloaders.smplx_loader.DataLoader
+  params:
+    apply_mask: False
+    render_width: 720
+    render_height: 1280
+    white_background: True
+    data_root: null  # set from --vid_path by main.py
+test_dataloader:
+  batch_size: 1
+  num_workers: 1
+  target: dataloaders.smplx_loader.DataLoader
+  params:
+    apply_mask: False
+    render_width: 720
+    render_height: 1280
+    white_background: True
+    data_root: null  # set from --vid_path by main.py
+
+callbacks:
+  image_logger:
+    target: callbacks.image_logger.ImageLogger
+    params:
+      visualize_step: 100

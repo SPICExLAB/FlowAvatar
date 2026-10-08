@@ -1,0 +1,47 @@
+# FlowAvatar streaming demo configuration.
+# Loaded by streaming/live_demo.py; command-line flags override values here.
+
+server:
+  input_port: 8888      # Unity -> Python tracking stream
+  output_port: 8889     # Python -> Unity predicted pose
+  buffer_size: 250      # circular frame-buffer capacity (frames)
+  debug_level: INFO
+
+default_model: gru
+
+models:
+  # Streaming configuration (best accuracy, see paper Table 4)
+  gru:
+    checkpoint: GRU/baseline.pt   # relative to the checkpoints directory
+    seq_len: 40
+    target_fps: 0                 # 0 = uncapped
+    arch:
+      hidden_dim: 256
+      num_layers: 3
+      use_lstm: false
+
+  # On-device (Sentis) architecture, run server-side. 40-frame window as in the
+  # Unity on-device model (streaming/export_onnx.py). On the headset the inputs are
+  # sampled at 30 Hz; Unity streams at 60 Hz unless SendTrackingData > Target FPS
+  # is set to 30.
+  lstm:
+    checkpoint: LSTM/baseline.pt
+    seq_len: 40
+    target_fps: 30
+    arch:
+      hidden_dim: 256
+      num_layers: 1
+      use_lstm: true
+
+# Input-feature masking. The Unity client always sends the full 90-D feature
+# vector; a flag set to false zeroes that feature group server-side before it
+# reaches the network. The released checkpoints were trained with ALL groups
+# enabled (including the head-relative hand features), so every flag must stay
+# true for them — only flip a flag when deploying a checkpoint trained with the
+# matching group disabled.
+features:
+  use_head: true
+  use_left_hand: true
+  use_right_hand: true
+  use_left_hand_head_space: true
+  use_right_hand_head_space: true

@@ -1,0 +1,6 @@
+# Loss ablation (paper Table 3): no temporal losses (velocity, acceleration)
+base: ../gru_smplh.yaml
+name: ablation_no_temporal
+loss:
+  acceleration: 0.0
+  velocity: 0.0

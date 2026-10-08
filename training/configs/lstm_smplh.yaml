@@ -1,0 +1,13 @@
+# On-device (live demo) setting on the benchmark data: 1-layer unidirectional
+# LSTM with ReLU activations, 20-frame windows at 30 fps, SMPL+H.
+base: gru_smplh.yaml
+name: lstm_smplh
+
+data:
+  root: data/amass_smplh_30fps  # `python -m training.prepare_data --fps 30`
+  fps: 30
+  seq_len: 20
+
+model:
+  num_layers: 1
+  use_lstm: true

@@ -1,0 +1,184 @@
+diff --git a/demo/pymafx_estimate_smplx.py b/demo/pymafx_estimate_smplx.py
+index 1cba462..48cb48e 100755
+--- a/demo/pymafx_estimate_smplx.py
++++ b/demo/pymafx_estimate_smplx.py
+@@ -65,8 +65,10 @@ def process_tracking_results(tracking_results_all_frames):
+         if num_person > max_instance:
+             max_instance = num_person
+         for result in tracking_results:
+-            tracklet.append(frame_id)
+-            final_results.append([result])
++            if result['track_id'] == 0:
++                #only single person training
++                tracklet.append(frame_id)
++                final_results.append([result])
+ 
+     return tracklet, final_results, max_instance
+ 
+@@ -215,6 +217,9 @@ def main(args):
+     pymafx_config.model['device'] = args.device
+     mesh_model, _ = init_model(
+         pymafx_config, args.mesh_reg_checkpoint, device=args.device.lower())
++
++    args.input_path = os.path.join(os.path.dirname(args.vid_path), 'images')
++    args.output_path = os.path.join(os.path.dirname(args.vid_path), 'smplx')
+     frames_iter = prepare_frames(args.input_path)
+     os.makedirs(args.output_path, exist_ok=True)
+     device = torch.device(args.device)
+@@ -240,6 +245,8 @@ def main(args):
+     dataloader = DataLoader(
+         test_dataset, batch_size=args.model_batch_size, num_workers=0)
+ 
++    camera_extrinsics = []
++    camera_intrinsics = []
+     # Run pred on each person
+     with torch.no_grad():
+         pred_cam, orig_height, orig_width, smplx_params = [], [], [], []
+@@ -275,7 +282,6 @@ def main(args):
+     pred_cam = pred_cam.cpu().numpy()
+     orig_height = orig_height.cpu().numpy()
+     orig_width = orig_width.cpu().numpy()
+-
+     orig_cam = convert_crop_cam_to_orig_img(
+         cam=pred_cam,
+         bbox=bboxes_cs,
+@@ -283,9 +289,49 @@ def main(args):
+         img_height=orig_height,
+         bbox_format='cs')
+ 
++
++    # pred_cam: N x 3
++    res = 224
++    # bbox_height = orig_height * bboxes_cs[:, 2]
++    r = bboxes_cs[..., 2] / res
++    focal_length = 5000
++    FAR = 100
++    NEAR = 0.01
++    tz = 2 * focal_length / (r * res * pred_cam[:, 0])
++
++    cx = 2 * (bboxes_cs[:, 0] - (orig_width / 2.)) / (pred_cam[:, 0] * bboxes_cs[..., 2])
++    cy = 2 * (bboxes_cs[:, 1] - (orig_height / 2.)) / (pred_cam[:, 0] * bboxes_cs[..., 2])
++
++    cam_t = np.stack([pred_cam[:, 1] + cx, pred_cam[:, 2] + cy, tz], axis=-1)
++
++    for i in range(cam_t.shape[0]):
++        cam_ext = np.eye(4)
++        cam_ext[:3,3] = cam_t[i,:]
++        camera_extrinsics.append(cam_ext.astype(np.float32))
++
++
++    for i in range(cam_t.shape[0]):
++        camera_mat = np.zeros([4, 4])
++        camera_mat[0, 0] = 2.0 * focal_length / orig_width[i]
++        camera_mat[1, 1] = 2.0 * focal_length / orig_height[i]
++        camera_mat[3, 2] = 1.0
++        camera_mat[2, 2] = -(FAR + NEAR) / (NEAR - FAR)
++        camera_mat[2, 3] = (2 * FAR * NEAR) / (NEAR - FAR)
++        camera_intrinsics.append(camera_mat.astype(np.float32))
++
++
+     del mesh_model
+     fullpose = []
+     betas = []
++    global_orients = []
++    body_poses = []
++    expressions = []
++    jaw_poses = []
++    leye_poses =[]
++    reye_poses =[]
++    left_hand_poses = []
++    right_hand_poses = []
++
+     for data in smplx_params:
+         smplx_results = dict(
+             global_orient=[],
+@@ -326,14 +372,37 @@ def main(args):
+             ),
+                            axis=1))
+         betas.append(smplx_results['betas'])
++        global_orients.append(smplx_results['global_orient'])
++        body_poses.append(smplx_results['body_pose'])
++        leye_poses.append(smplx_results['leye_pose'])
++        reye_poses.append(smplx_results['reye_pose'])
++        jaw_poses.append(smplx_results['jaw_pose'])
++        left_hand_poses.append(smplx_results['left_hand_pose'])
++        right_hand_poses.append(smplx_results['right_hand_pose'])
++        expressions.append(smplx_results['expression'])
+     fullpose = np.concatenate(fullpose, axis=0)
+     betas = np.concatenate(betas, axis=0)
++    global_orients = np.concatenate(global_orients, axis=0)
++    body_poses = np.concatenate(body_poses, axis=0)
++    leye_poses = np.concatenate(leye_poses, axis=0)
++    reye_poses = np.concatenate(reye_poses, axis=0)
++    jaw_poses = np.concatenate(jaw_poses, axis=0)
++    left_hand_poses = np.concatenate(left_hand_poses, axis=0)
++    right_hand_poses = np.concatenate(right_hand_poses, axis=0)
++    expressions = np.concatenate(expressions, axis=0)
+     human_data = HumanData()
+     smplx = {}
+     smplx['fullpose'] = fullpose
+     smplx['betas'] = betas
+-    human_data['smplx'] = smplx
+-    human_data.dump(osp.join(args.output_path, 'inference_result.npz'))
++    smplx['global_orient'] = global_orients
++    smplx['body_pose'] = body_poses
++    smplx['leye_pose'] = leye_poses
++    smplx['reye_pose'] = reye_poses
++    smplx['jaw_pose'] = jaw_poses
++    smplx['left_hand_pose'] = left_hand_poses
++    smplx['right_hand_pose'] = right_hand_poses
++    smplx['expression'] = expressions
++
+     # create body model
+     body_model_config = dict(
+         type='smplx',
+@@ -393,6 +462,7 @@ def main(args):
+                     resolution=(image.shape[0], image.shape[1]),
+                     overwrite=True,
+                 )
++
+         elif Path(args.input_path).is_file():
+             visualize_smpl_vibe(
+                 poses=compressed_fullpose.reshape(-1, max_instance, 165),
+@@ -406,6 +476,16 @@ def main(args):
+             )
+             shutil.rmtree(image_folder)
+ 
++    smplx['camera_intrinsic'] = camera_intrinsics
++    smplx['camera_extrinsic'] = camera_extrinsics
++    mean_betas = betas[0]
++    for i in range(1,len(betas)):
++        mean_betas = mean_betas + betas[i]
++    mean_betas = mean_betas / len(betas)
++    np.save(osp.join(args.output_path, 'betas.npy'), mean_betas)
++
++    human_data['smplx'] = smplx
++    human_data.dump(osp.join(args.output_path, 'inference_result.npz'))
+ 
+ def init_openpifpaf(parser):
+     ppnetwork.Factory.cli(parser)
+@@ -467,12 +547,14 @@ if __name__ == '__main__':
+         'hrnet_w48_coco_wholebody_384x288_dark-f5726563_20200918.pth',
+         help='Checkpoint file for pose')
+ 
++    parser.add_argument(
++        '--vid_path', type=str, default=None, help='video path')
+     parser.add_argument(
+         '--input_path', type=str, default=None, help='input folder')
+     parser.add_argument(
+         '--output_path',
+         type=str,
+-        default='output',
++        default='output_pymafx',
+         help='output folder to write results')
+     parser.add_argument(
+         '--visualization', action='store_true', help='SMPLX Visualization')
+@@ -480,7 +562,7 @@ if __name__ == '__main__':
+     parser.add_argument(
+         '--device',
+         choices=['cpu', 'cuda'],
+-        default='cuda',
++        default='cuda:0',
+         help='device used for testing')
+     parser.add_argument(
+         '--model_batch_size',

@@ -1,0 +1,16 @@
+# Deployment model: the configuration of checkpoints/GRU/baseline.pt used by
+# the streaming demo. Neutral SMPL-X body with 10 betas (the Unity avatar) and
+# the per-region pose heads of flowavatar.models.load_checkpoint('gru').
+# Numbers are NOT comparable with the SMPL+H benchmark configs.
+base: gru_smplh.yaml
+name: gru_smplx
+
+data:
+  root: data/amass_smplx_60fps  # `python -m training.prepare_data --fps 60 --body_model smplx`
+
+body_model:
+  file: null                    # = $SMPLX_MODEL_PATH or body_models/smplx/SMPLX_NEUTRAL.npz
+  num_betas: 10
+
+model:
+  unified_predictor: false

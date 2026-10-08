@@ -1,0 +1,708 @@
+diff --git a/callbacks/image_logger.py b/callbacks/image_logger.py
+index 3d0dbc4..2ecd79b 100644
+--- a/callbacks/image_logger.py
++++ b/callbacks/image_logger.py
+@@ -31,13 +31,13 @@ class ImageLogger:
+         keys_to_save = [
+             "mesh_rasterization",
+             "rgb_image",
+-            "gaussian_rasterization",
+-            "merged_mask",
+-            "gaussian_depth",
+-            "mesh_depth",
++            # "gaussian_rasterization",
++            # "merged_mask",
++            # "gaussian_depth",
++            # "mesh_depth",
+             "rasterization",
+-            "skin_mask",
+-            "gaussian_alpha",
++            # "skin_mask",
++            # "gaussian_alpha",
+             "texture"
+         ]
+ 
+diff --git a/criteria/l2_loss.py b/criteria/l2_loss.py
+index ca434ae..fa6ce47 100644
+--- a/criteria/l2_loss.py
++++ b/criteria/l2_loss.py
+@@ -8,7 +8,7 @@ class L2Loss(torch.nn.Module):
+     def __init__(self, weight=1.):
+         super().__init__()
+         self._weight = weight
+-        self._loss_fn_l2 = torch.nn.MSELoss()
++        self._loss_fn_l2 = torch.nn.MSELoss(reduction='none')
+ 
+     def forward(self, data_dict, training_stage):
+         if training_stage not in [TrainingStage.OPTIMIZE_OPACITY,
+@@ -22,12 +22,15 @@ class L2Loss(torch.nn.Module):
+             use_mask = True
+         else:
+             use_mask = False
++        
+         gt_image = data_dict["rgb_image"]
+         render_image = data_dict["rasterization"]
+ 
+         if use_mask:
+             loss_mask = get_lossmask(data_dict["merged_mask"][:, 0:1, ...], data_dict["mask_image"])
++            # loss_mask = get_lossmask(data_dict["merged_mask"][:, 0:1, ...], data_dict["mask_head_image"])
+             loss = self._loss_fn_l2(gt_image * loss_mask, render_image * loss_mask) * self._weight
+         else:
+             loss = self._loss_fn_l2(gt_image, render_image) * self._weight
++        # print(loss_per_sample)
+         return loss
+diff --git a/dataloaders/smplx_loader.py b/dataloaders/smplx_loader.py
+index 3dbcaaf..4867d8c 100644
+--- a/dataloaders/smplx_loader.py
++++ b/dataloaders/smplx_loader.py
+@@ -27,21 +27,46 @@ class DataLoader(torch.utils.data.Dataset):
+             use_hashing=False,
+             random_background=False,
+             white_background=False,
+-            render_size=640,
++            render_width=640,
++            render_height=640,
++            apply_mask = True,
++            train_head_only = False,
++            train_head_upper_only = False,
++            sample_stride = 1
+     ):
+-        self._images_path = os.path.join(data_root, "images")
++        if train_head_only:
++            self._images_path = os.path.join(data_root, "align_head")
++            self._masks_head_path = os.path.join(data_root, "masks_aligned_head")
++        elif train_head_upper_only:
++            self._images_path = os.path.join(data_root, "images")
++            self._masks_head_path = os.path.join(data_root, "masks_aligned_head_upper")
++        else:
++            self._images_path = os.path.join(data_root, "images")
++            self._masks_head_path = os.path.join(data_root, "masks_head")
+         self._masks_path = os.path.join(data_root, "masks")
+         self._smplx_path = os.path.join(data_root, "smplx/results")
+-        self._render_size = render_size
++        self._render_size = (render_width, render_height)
++
++        data = np.load(os.path.join(data_root, "smplx" ,'inference_result.npz'), allow_pickle=True)
++        self._smplx_data = data['smplx'].tolist()
++        print(self._smplx_data['betas'].shape)
++        print(self._smplx_data['fullpose'].shape)
+ 
+         # Get images list
+-        self._images_list = glob(os.path.join(self._images_path, "*"))
++        if train_head_upper_only:
++            self._images_list = glob(os.path.join(self._masks_head_path, "*"))
++        else:
++            self._images_list = glob(os.path.join(self._images_path, "*"))
+         self._images_list = sorted(self._images_list, key=lambda x: int(path_to_id(x)))
++        self._images_list = self._images_list[::sample_stride]
+         self._len = len(self._images_list)
+ 
+         self._random_background = random_background
+         self._white_background = white_background
+         self._use_hashing = use_hashing
++        self._apply_mask = apply_mask
++        self._train_head_only = train_head_only
++        self._train_head_upper_only = train_head_upper_only
+         self._data_hash = {}
+ 
+         self.sequence_name = data_root.split('/')[-1].split('-test')[0]
+@@ -49,7 +74,7 @@ class DataLoader(torch.utils.data.Dataset):
+     def load_sample(self, pid):
+         rgb_image = cv2.imread(os.path.join(self._images_path, pid + ".png"))[..., ::-1]
+         rgb_image = rgb_image.astype(np.float32) / 255.0
+-        rgb_image = cv2.resize(rgb_image, (self._render_size, self._render_size))
++        rgb_image = cv2.resize(rgb_image, self._render_size)
+         rgb_image = np.transpose(rgb_image, (2, 0, 1))
+ 
+         if self._white_background:
+@@ -64,7 +89,24 @@ class DataLoader(torch.utils.data.Dataset):
+             background[1] *= background_color[1]
+             background[2] *= background_color[2]
+ 
+-        mask_image = cv2.imread(os.path.join(self._masks_path, pid + "_gray.png"))
++        if self._apply_mask:
++            if self._train_head_only:
++                #train head only
++                mask_image = cv2.imread(os.path.join(self._masks_path, pid + ".png"))
++                mask_head_image = cv2.imread(os.path.join(self._masks_head_path, pid + ".png"))
++                mask_image = mask_image * mask_head_image
++            elif self._train_head_upper_only:
++                #train upper head only
++                mask_image = cv2.imread(os.path.join(self._masks_path, pid + ".png"))
++                mask_head_image = cv2.imread(os.path.join(self._masks_head_path, pid + ".png"))
++                mask_image = mask_image * mask_head_image
++            else:
++                #train except head
++                mask_image = cv2.imread(os.path.join(self._masks_path, pid + ".png"))
++                mask_head_image = cv2.imread(os.path.join(self._masks_head_path, pid + ".png"))
++                mask_image = mask_image * mask_head_image
++        else:
++            mask_image = np.ones((rgb_image.shape[1],rgb_image.shape[2],rgb_image.shape[0])) * 255
+         skin_mask = np.zeros_like(mask_image).astype(int)
+         for label in [10, 13, 14, 15, 16, 17]:  # All skin labels
+             skin_mask |= (mask_image == label).astype(int)
+@@ -73,21 +115,52 @@ class DataLoader(torch.utils.data.Dataset):
+ 
+         mask_image = mask_image.astype(np.float32)
+         mask_image = cv2.cvtColor(mask_image, cv2.COLOR_BGR2GRAY)[..., np.newaxis]
+-        mask_image = cv2.resize(mask_image, (self._render_size, self._render_size))
++        mask_image = cv2.resize(mask_image, self._render_size)
+         _, mask_image = cv2.threshold(mask_image, 0.01, 1, cv2.THRESH_BINARY)
+ 
++        # mask_head_image = mask_head_image.astype(np.float32)
++        # mask_head_image = cv2.cvtColor(mask_head_image, cv2.COLOR_BGR2GRAY)[..., np.newaxis]
++        # mask_head_image = cv2.resize(mask_head_image, (self._render_size, self._render_size))
++        # _, mask_head_image = cv2.threshold(mask_head_image, 0.01, 1, cv2.THRESH_BINARY)
++
+         mask_image = mask_image[None]
+         rgb_image = mask_image * rgb_image + (1 - mask_image) * background
+ 
+         # Load pickle
+-        smplx_filename = os.path.join(self._smplx_path, pid, "000.pkl")
+-        with open(smplx_filename, "rb") as f:
+-            smplx_params = pickle.load(f)
++        smplx_params = {}
++        intpid = int(pid)
++        # smplx_filename = os.path.join(self._smplx_path, pid, "000.pkl")
++        # with open(smplx_filename, "rb") as f:
++        #     smplx_params = pickle.load(f)
++        for k in self._smplx_data.keys():
++            smplx_params[k] = self._smplx_data[k][intpid]
++        # match format
++        smplx_params['betas'] = smplx_params['betas'][None,:]
++        smplx_params['expression'] = smplx_params['expression'][None,:]
++        smplx_params['left_hand_pose'] = smplx_params['left_hand_pose'].reshape(1,-1)
++        smplx_params['right_hand_pose'] = smplx_params['right_hand_pose'].reshape(1,-1)
++        smplx_params['body_pose'] = smplx_params['body_pose'].reshape(1,-1)
++        # print(smplx_params['camera_matrix'])
++        smplx_params['camera_matrix'] = smplx_params['camera_intrinsic'].squeeze()
++        smplx_params['camera_transform'] = smplx_params['camera_extrinsic'].squeeze()
++        # smplx_params['camera_transform'][2,3] = -5.2083335 * smplx_params['camera_transform'][2,3]
++        # print(smplx_params['camera_transform'][2,3])
++        # print(smplx_params['camera_matrix'])
++        # print(smplx_params['camera_transform'])
++        # for k in self._smplx_data.keys():
++        #     print(k)
++        #     print(smplx_params[k].shape)
++        # print(smplx_params['camera_matrix'])
++        # print(smplx_params['camera_transform'])
++        # smplx_params['camera_transform'][0,3] = 0.
++        # smplx_params['camera_transform'][1,3] = 0.
++        # smplx_params['camera_transform'][2,3] = 5.
+ 
+         return {
+             "pid": pid,
+             "rgb_image": rgb_image,
+             "mask_image": mask_image,
++            # "mask_head_image": mask_head_image,
+             "skin_mask": skin_mask,
+             "background": background,
+             "smplx_params": smplx_params,
+diff --git a/main.py b/main.py
+index 47f2fc1..b7253ea 100644
+--- a/main.py
++++ b/main.py
+@@ -46,14 +46,21 @@ def get_parser(**parser_kwargs):
+         nargs="?",
+         help="Load pretrained weights from the checkpoint",
+     )
++    parser.add_argument(
++        "-v",
++        "--vid_path",
++        type=str,
++        help="video path",
++    )
+     return parser
+ 
+ 
+ def generate_path_to_logs(config, opt, sequence_name):
+     experiment_name = opt.base[0].split('/')[-1].split('.yaml')[0]
+-    time = datetime.datetime.now()
+-    run_name = sequence_name + time.strftime(f"-%Y_%m-%d_%H-%M")
+-    log_dir = os.path.join(config.logdir, experiment_name, run_name)
++    # time = datetime.datetime.now()
++    # run_name = sequence_name + time.strftime(f"-%Y_%m-%d_%H-%M")
++    # log_dir = os.path.join(os.path.dirname(opt.vid_path), experiment_name, run_name)
++    log_dir = os.path.join(os.path.dirname(opt.vid_path), experiment_name)
+     return log_dir
+ 
+ 
+@@ -101,7 +108,7 @@ def setup_tensorboard_logger(runner, config, opt, sequence_name):
+     log_dir = generate_path_to_logs(config, opt, sequence_name)
+     if opt.test_mode:
+         log_dir += '-test'
+-    os.makedirs(log_dir, exist_ok=False)
++    os.makedirs(log_dir, exist_ok=True)
+     runner.logger = SummaryWriter(log_dir)
+ 
+ 
+@@ -121,11 +128,17 @@ def main(args):
+     cli = OmegaConf.from_dotlist(unknown)
+     config = OmegaConf.merge(*configs, cli)
+ 
++    data_dir = os.path.dirname(opt.vid_path)
++    config.train_dataloader.params.data_root = data_dir
++    config.val_dataloader.params.data_root = data_dir
++    config.test_dataloader.params.data_root = data_dir
++
+     runner = instantiate_from_config(config.runner)
+     runner.to(runner.device)
+ 
+     setup_callbacks(runner, config)
+ 
++
+     if opt.pretrained:
+         runner.load_checkpoint(opt.pretrained)
+ 
+@@ -134,7 +147,7 @@ def main(args):
+         setup_tensorboard_logger(runner, config, opt, test_dataset.sequence_name)
+ 
+         runner.initialize_optimizable_pose(test_dataset)
+-        runner.fit_pose(test_dataloader)
++        # runner.fit_pose(test_dataloader)
+         runner.test(test_dataloader)
+     else:
+         train_dataset, train_dataloader, val_dataloader = create_train_val_datasets(config)
+diff --git a/runners/train_gaussians.py b/runners/train_gaussians.py
+index bd9ac00..008673c 100644
+--- a/runners/train_gaussians.py
++++ b/runners/train_gaussians.py
+@@ -2,6 +2,7 @@ import os
+ import statistics
+ from collections import defaultdict
+ 
++import shutil
+ import cv2
+ import numpy as np
+ import smplx
+@@ -16,21 +17,25 @@ from tqdm import tqdm
+ 
+ from main import TrainingStage
+ from utils.data import dict2device, pass_smplx_dict, rotate_verts
+-from utils.gaussian_rasterizer import MyGaussianRasterizer
++# from utils.gaussian_rasterizer import MyGaussianRasterizer
+ from utils.general import instantiate_from_config, q_normalize, s_act, o_act, s_inv_act
+ from utils.lr_scheduler import ExponentialLRxyz
+ from utils.optimizer_utils import cat_tensors_to_optimizer, prune_optimizer
+ from utils.rasterizer import NVDiffrast
++from utils.uv_utils import read_obj
+ 
+-from pytorch3d.ops import knn_points
++# from criteria.laplacian_loss import laplacian_loss
+ 
++# from pytorch3d.ops import knn_points
++from smplx.lbs import transform_mat
+ 
+ class TextureAndGaussianTrainer(nn.Module):
+     BETAS_SHAPE = 10
+ 
+     def __init__(
+             self,
+-            render_size,
++            render_width,
++            render_height,
+             texture_size,
+             criteria_config,
+             smplx_path,
+@@ -64,7 +69,8 @@ class TextureAndGaussianTrainer(nn.Module):
+             prune_stop=100000,
+ 
+             use_pca_for_hands=False,
+-            eval_frequency=1000,
++            eval_frequency=5000,
++            # eval_frequency=5000,
+     ):
+         super().__init__()
+ 
+@@ -82,7 +88,7 @@ class TextureAndGaussianTrainer(nn.Module):
+         self._tto_pose_lr = tto_pose_lr
+         self._tto_decay_steps = tto_decay_steps
+ 
+-        self._render_size = render_size
++        self._render_size = (render_height, render_width)
+         self._gaussians_optimize_steps = gaussians_optimize_steps
+         self._texture_optimize_steps = texture_optimize_steps
+         self._opacity_optimize_steps = opacity_optimize_steps
+@@ -117,10 +123,10 @@ class TextureAndGaussianTrainer(nn.Module):
+         self._body_pose_dict_hf = torch.nn.ParameterDict()
+ 
+         # Create rasterizers
+-        self._rasterizer = NVDiffrast(render_size)
+-        self._gaussian_rasterizer = MyGaussianRasterizer(
+-            render_size=render_size
+-        )
++        self._rasterizer = NVDiffrast(self._render_size)
++        # self._gaussian_rasterizer = MyGaussianRasterizer(
++        #     render_size=render_size
++        # )
+ 
+         # Load parametric models and loses
+         self._load_smplx_model(smplx_path, gender)
+@@ -141,7 +147,7 @@ class TextureAndGaussianTrainer(nn.Module):
+ 
+     def _initialize_texture(self):
+         #self._trainable_texture = torch.zeros((3, self._texture_size, self._texture_size))
+-        prior_texture = cv2.imread("./metadata/init_texture.jpg")[..., ::-1]
++        prior_texture = cv2.imread("./metadata/smplx_texture_f_alb_512.png")[..., ::-1]
+         prior_texture = prior_texture[::-1]
+         prior_texture = cv2.resize(prior_texture, (self._texture_size, self._texture_size))
+         prior_texture = np.transpose(prior_texture, (2, 0, 1)) / 255
+@@ -179,12 +185,18 @@ class TextureAndGaussianTrainer(nn.Module):
+         self._faces = self._smplx_model.faces_tensor.contiguous().int()
+ 
+         model_fn = 'SMPLX_{}.{ext}'.format(gender.upper(), ext="npz")
+-        smplx_path = os.path.join(smplx_path, 'smplx', model_fn)
+-        model_data = np.load(smplx_path, allow_pickle=True)
++        smplx_file_path = os.path.join(smplx_path, 'smplx', model_fn)
++        model_data = np.load(smplx_file_path, allow_pickle=True)
+         data_struct = Struct(**model_data)
+ 
+-        self._uv = torch.Tensor(data_struct.vt).contiguous()
+-        self._uv_idx = torch.Tensor(data_struct.ft.astype(np.int32)).contiguous().int()
++        # Use SMPL-X unity version
++        vt_new, ft_new = read_obj(os.path.join(smplx_path, 'smplx', 'smplx-10.obj'))
++        self._uv = torch.Tensor(vt_new).contiguous()
++        #IMPORTANT: make uv id starting from 0
++        self._uv_idx = torch.Tensor(ft_new.astype(np.int32) - 1).contiguous().int()
++
++        # self._uv = torch.Tensor(data_struct.vt).contiguous()
++        # self._uv_idx = torch.Tensor(data_struct.ft.astype(np.int32)).contiguous().int()
+         self._rasterizer.set_smplx_parameters(self._faces, self._uv, self._uv_idx)
+ 
+     def change_parameters_shape(self, npoints):
+@@ -241,6 +253,13 @@ class TextureAndGaussianTrainer(nn.Module):
+             'state_dict': self.state_dict(),
+         }, save_path)
+ 
++        #copy final texture
++        final_texture = cv2.imread(os.path.join(self.logger.log_dir, "val/texture/s%06d_b000.png"%step))
++        save_texture = cv2.flip(final_texture, 0)
++        # last_dir = str.split(self.logger.log_dir,'/')[-1]
++        # save_dir = str.replace(self.logger.log_dir,'/'+last_dir,'')
++        cv2.imwrite(os.path.join(self.logger.log_dir,'texture.png'),save_texture)
++
+     def initialize_optimizable_pose(self, dataset):
+         for i in range(dataset._len):
+             data_dict = dataset[i]
+@@ -257,8 +276,8 @@ class TextureAndGaussianTrainer(nn.Module):
+ 
+             global_orient = torch.tensor(smplx_params["global_orient"], requires_grad=True, device=self.device)
+             self._body_pose_dict[pid]["global_orient"] = torch.nn.Parameter(global_orient, requires_grad=True)
+-            transl = torch.tensor(smplx_params["transl"], requires_grad=True, device=self.device)
+-            self._body_pose_dict[pid]["transl"] = torch.nn.Parameter(transl, requires_grad=True)
++            # transl = torch.tensor(smplx_params["transl"], requires_grad=True, device=self.device)
++            # self._body_pose_dict[pid]["transl"] = torch.nn.Parameter(transl, requires_grad=True)
+ 
+             body_pose = torch.tensor(smplx_params["body_pose"], requires_grad=True, device=self.device)
+             self._body_pose_dict[pid]["body_pose"] = torch.nn.Parameter(body_pose, requires_grad=True)
+@@ -281,6 +300,10 @@ class TextureAndGaussianTrainer(nn.Module):
+             expression = torch.tensor(smplx_params["expression"], requires_grad=True, device=self.device)
+             self._body_pose_dict_hf[pid]["expression"] = torch.nn.Parameter(expression, requires_grad=True)
+ 
++            ###### Add offsets
++            # template_offsets = torch.zeros_like(self._smplx_model.v_template)
++            # self._template_offsets = torch.nn.Parameter(template_offsets, requires_grad=True)
++
+     def set_callbacks(self, callbacks):
+         self._callbacks = callbacks
+ 
+@@ -317,6 +340,11 @@ class TextureAndGaussianTrainer(nn.Module):
+             for v in frame_data.values():
+                 params_hf.append(v)
+ 
++        params_offset = []
++        for frame_data in self._body_pose_dict_hf.values():
++            for v in frame_data.values():
++                params_hf.append(v)
++
+         print("Trainable pose parameters:", len(params))
+         print("*" * 10)
+ 
+@@ -344,6 +372,7 @@ class TextureAndGaussianTrainer(nn.Module):
+             {'params': [self._opacity], 'lr': self._opacity_lr, 'name': '_opacity'},
+             {'params': params, 'lr': self._pose_lr, 'name': 'smplx_pose_params'},
+             {'params': params_hf, 'lr': self._pose_lr / self._pose_hf_scale, 'name': 'smplx_pose_params_hf'},
++            # {'params': [self._template_offsets], 'lr': self._pose_lr / self._pose_hf_scale, 'name': 'template_offsets'},
+         ])
+ 
+         return optimizer
+@@ -517,13 +546,14 @@ class TextureAndGaussianTrainer(nn.Module):
+             pose_vectors.append(
+                 torch.cat(
+                     [
+-                        smplx_params["transl"],
++                        # smplx_params["transl"],
+                         smplx_params["global_orient"],
+                         smplx_params["body_pose"]
+                     ], dim=1)[0]
+             )
+ 
+             # Inference SMPL-X
++            # self._smplx_model.v_template = self._smplx_model.v_template + self._template_offsets
+             model_output = pass_smplx_dict(smplx_params, self._smplx_model, "cuda")
+             vertices.append(model_output["vertices"])
+ 
+@@ -597,9 +627,9 @@ class TextureAndGaussianTrainer(nn.Module):
+     def _change_lr(self, optimizer, training_stage):
+         if training_stage == TrainingStage.INIT_TEXTURE:
+             opt_params = next(item for item in optimizer.param_groups if item["name"] == "smplx_pose_params")
+-            opt_params['lr'] = 0  # Frize smplx pose optimization
++            opt_params['lr'] = self._pose_lr  # Unfrize smplx pose optimization
+             opt_params = next(item for item in optimizer.param_groups if item["name"] == "smplx_pose_params_hf")
+-            opt_params['lr'] = 0  # Frize smplx pose optimization
++            opt_params['lr'] = self._pose_lr / self._pose_hf_scale  # Unfrize smplx pose optimization
+             opt_params = next(item for item in optimizer.param_groups if item["name"] == "_opacity")
+             opt_params['lr'] = 0
+         elif training_stage in [TrainingStage.OPTIMIZE_GAUSSIANS]:
+@@ -611,9 +641,13 @@ class TextureAndGaussianTrainer(nn.Module):
+             opt_params['lr'] = 0
+         elif training_stage == TrainingStage.FINETUNE_TEXTURE:
+             opt_params = next(item for item in optimizer.param_groups if item["name"] == "smplx_pose_params")
+-            opt_params['lr'] = 0  # Frize smplx pose optimization
++            opt_params['lr'] = self._pose_lr  # Unfrize smplx pose optimization
+             opt_params = next(item for item in optimizer.param_groups if item["name"] == "smplx_pose_params_hf")
+-            opt_params['lr'] = 0  # Frize smplx pose optimization
++            opt_params['lr'] = self._pose_lr / self._pose_hf_scale  # Unfrize smplx pose optimization
++            opt_params = next(item for item in optimizer.param_groups if item["name"] == "template_offsets")
++            opt_params['lr'] = 1e-7 #self._pose_lr / self._pose_hf_scale
++            opt_params = next(item for item in optimizer.param_groups if item["name"] == "_trainable_texture")
++            opt_params['lr'] = 0 #self._pose_lr / self._pose_hf_scale
+         elif training_stage == TrainingStage.OPTIMIZE_OPACITY:
+             for item in optimizer.param_groups:
+                 item["lr"] = 0
+@@ -700,7 +734,8 @@ class TextureAndGaussianTrainer(nn.Module):
+ 
+             optimizer.zero_grad()
+ 
+-            loss, outputs = self.training_step(train_batch, training_stage)
++            loss, outputs = self.training_step(train_batch, training_stage, step>1000)
++
+             loss.backward()
+             optimizer.step()
+             if scheduler:
+@@ -721,8 +756,8 @@ class TextureAndGaussianTrainer(nn.Module):
+                     if (step - self._prune_start + 1) % self._prune_step == 0:
+                         self.prune(optimizer)
+ 
+-            if val_dataloader is not None and self.global_step % self._eval_frequency == 0:
+-                self.evaluate(val_dataloader, training_stage)
++            # if val_dataloader is not None and self.global_step % self._eval_frequency == 0:# and self.global_step > 0:
++            #     self.evaluate(val_dataloader, training_stage)
+ 
+             self.global_step += 1
+ 
+@@ -730,42 +765,65 @@ class TextureAndGaussianTrainer(nn.Module):
+         self.global_step = 0
+ 
+         # Train Gaussians
+-        optimizer = self.configure_optimizers()
+-        scheduler = ExponentialLRxyz(optimizer, 0, self._gaussians_optimize_steps,
+-                                     self._position_lr,
+-                                     self._final_position_lr,
+-                                     '_xyz')
++        # optimizer = self.configure_optimizers()
++        # scheduler = ExponentialLRxyz(optimizer, 0, self._gaussians_optimize_steps,
++        #                              self._position_lr,
++        #                              self._final_position_lr,
++        #                              '_xyz')
++
++        # training_stage = TrainingStage.OPTIMIZE_GAUSSIANS
++        # self._change_lr(optimizer, training_stage)
++        # self.fit_training_stage(
++        #     optimizer, train_dataloader, val_dataloader, training_stage, self._gaussians_optimize_steps, scheduler
++        # )
++        # if val_dataloader is not None:
++        #     self.evaluate(val_dataloader, training_stage)
++        # self.save_checkpoint(training_stage, self.global_step)
+ 
+-        training_stage = TrainingStage.OPTIMIZE_GAUSSIANS
+-        self._change_lr(optimizer, training_stage)
+-        self.fit_training_stage(
+-            optimizer, train_dataloader, val_dataloader, training_stage, self._gaussians_optimize_steps, scheduler
+-        )
+-        if val_dataloader is not None:
+-            self.evaluate(val_dataloader, training_stage)
+-        self.save_checkpoint(training_stage, self.global_step)
+ 
+         # Train the texture
+         optimizer = self.configure_optimizers()
+-        training_stage = TrainingStage.FINETUNE_TEXTURE
++        scheduler_tex = ExponentialLRxyz(optimizer, 0, self._texture_optimize_steps,
++                                     self._lr_texture,
++                                     self._lr_texture*0.1,
++                                     '_xyz')
++        training_stage = TrainingStage.INIT_TEXTURE
++        # training_stage = TrainingStage.FINETUNE_TEXTURE
+         self._change_lr(optimizer, training_stage)
+         self.fit_training_stage(
+-            optimizer, train_dataloader, val_dataloader, training_stage, self._texture_optimize_steps
++            optimizer, train_dataloader, val_dataloader, training_stage, self._texture_optimize_steps, scheduler_tex
+         )
+         if val_dataloader is not None:
+             self.evaluate(val_dataloader, training_stage)
+-        self.save_checkpoint(training_stage, self.global_step)
++        if self.global_step > 1:
++            self.save_checkpoint(training_stage, self.global_step)
++
++
++        # optimizer = self.configure_optimizers()
++        # scheduler_tex = ExponentialLRxyz(optimizer, 0, self._texture_optimize_steps,
++        #                              self._lr_texture,
++        #                              self._lr_texture*0.1,
++        #                              '_xyz')
++        # training_stage = TrainingStage.FINETUNE_TEXTURE
++        # # training_stage = TrainingStage.FINETUNE_TEXTURE
++        # self._change_lr(optimizer, training_stage)
++        # self.fit_training_stage(
++        #     optimizer, train_dataloader, val_dataloader, training_stage, self._texture_optimize_steps, scheduler_tex
++        # )
++        # if val_dataloader is not None:
++        #     self.evaluate(val_dataloader, training_stage)
++        # self.save_checkpoint(training_stage, self.global_step)
+ 
+         # Train the opacity
+-        optimizer = self.configure_optimizers()
+-        training_stage = TrainingStage.OPTIMIZE_OPACITY
+-        self._change_lr(optimizer, training_stage)
+-        self.fit_training_stage(
+-            optimizer, train_dataloader, val_dataloader, training_stage, self._opacity_optimize_steps
+-        )
+-        if val_dataloader is not None:
+-            self.evaluate(val_dataloader, training_stage)
+-        self.save_checkpoint(training_stage, self.global_step)
++        # optimizer = self.configure_optimizers()
++        # training_stage = TrainingStage.OPTIMIZE_OPACITY
++        # self._change_lr(optimizer, training_stage)
++        # self.fit_training_stage(
++        #     optimizer, train_dataloader, val_dataloader, training_stage, self._opacity_optimize_steps
++        # )
++        # if val_dataloader is not None:
++        #     self.evaluate(val_dataloader, training_stage)
++        # self.save_checkpoint(training_stage, self.global_step)
+ 
+     def fit_pose(self, test_dataloader):
+         optimizer = self.configure_optimizers_pose_tune()
+@@ -817,13 +875,26 @@ class TextureAndGaussianTrainer(nn.Module):
+                 self.ping_callbacks("on_test_batch_end", outputs)
+             self.ping_callbacks("on_test_end")
+ 
+-    def training_step(self, train_batch, training_stage):
++    def training_step(self, train_batch, training_stage, maskSamples):
+         train_batch = dict2device(train_batch, self.device)
+         loss = 0
+         self._render_frame(train_batch, training_stage)
+ 
+         for criterion_name, criterion in self._criteria.items():
+             local_loss = criterion(train_batch, training_stage=training_stage)
++
++            if criterion_name=='l2_loss':
++                if maskSamples:
++                    upper_loss = local_loss[:,:,:250,:]
++                    upper_loss_per_sample = torch.mean(upper_loss,dim=(1,2,3))
++
++                    # Min or max?
++                    _, max_indices = torch.min(upper_loss_per_sample, dim=0)
++                    local_loss[max_indices,:,:250,:] = local_loss[max_indices,:,:250,:]*0
++                    local_loss = torch.mean(local_loss)
++                else:
++                    local_loss = torch.mean(local_loss)
++                
+             loss += local_loss
+ 
+             if self.global_step % self._logging_frequency == 0:
+@@ -831,6 +902,12 @@ class TextureAndGaussianTrainer(nn.Module):
+ 
+         if self.global_step % self._logging_frequency == 0:
+             self.log('monitoring_step', self.global_step)
++
++        ################
++        # lap_loss = laplacian_loss(train_batch["vertices"], self._faces)
++        # loss += 10. * lap_loss
++        # print(lap_loss)
++
+         return loss, train_batch
+ 
+     @torch.no_grad()
+@@ -842,6 +919,8 @@ class TextureAndGaussianTrainer(nn.Module):
+         for criterion_name, criterion in self._criteria.items():
+             local_loss = criterion(val_batch, training_stage=training_stage)
+             if torch.is_tensor(local_loss):
++                if criterion_name=='l2_loss':
++                    local_loss = torch.mean(local_loss)
+                 local_loss = local_loss.detach().cpu().numpy().item()
+             metrics[criterion_name] = local_loss
+ 
+diff --git a/utils/lr_scheduler.py b/utils/lr_scheduler.py
+index e8116a6..6758a26 100644
+--- a/utils/lr_scheduler.py
++++ b/utils/lr_scheduler.py
+@@ -20,7 +20,7 @@ class ExponentialLRxyz(ExponentialLR):
+         self._start_value = start_value
+         self._stop_value = stop_value
+         self._group_name = group_name
+-        super().__init__(optimizer, 0, -1, verbose)
++        super().__init__(optimizer, 0, -1)  # no verbose argument: removed in PyTorch 2.7
+ 
+     def get_lr(self):
+         if not self._get_lr_called_within_step:
+diff --git a/utils/rasterizer.py b/utils/rasterizer.py
+index 70b265c..893e759 100644
+--- a/utils/rasterizer.py
++++ b/utils/rasterizer.py
+@@ -3,7 +3,7 @@ import torch
+ 
+ 
+ class NVDiffrast(torch.nn.Module):
+-    def __init__(self, render_size=640):
++    def __init__(self, render_size=(640,640)):
+         super().__init__()
+         self._cudactx = dr.RasterizeCudaContext()
+         self._render_size = render_size
+@@ -39,7 +39,7 @@ class NVDiffrast(torch.nn.Module):
+         pos_color = pos
+         tri = self._faces.to(pos.device)
+ 
+-        rast, _ = dr.rasterize(self._cudactx, pos, tri, resolution=[self._render_size, self._render_size])
++        rast, _ = dr.rasterize(self._cudactx, pos, tri, resolution=self._render_size)
+ 
+         batch_size = len(vertices)
+         uv = self._uv[None, ...].repeat(batch_size, 1, 1).to(rast.device)
+diff --git a/utils/uv_utils.py b/utils/uv_utils.py
+index 9e2bc2a..9e47eac 100644
+--- a/utils/uv_utils.py
++++ b/utils/uv_utils.py
+@@ -23,7 +23,33 @@ import os
+ from fractions import Fraction
+ 
+ import av
+-
++import numpy as np
++
++def read_obj(file_path):
++    # read vt and ft
++    vertices = []
++    faces = []
++
++    with open(file_path, 'r') as file:
++        for line in file:
++            parts = line.strip().split()
++            if not parts:
++                continue
++
++            if parts[0] == 'vt':
++                try:
++                    vertex = list(map(float, parts[1:3]))
++                    vertices.append(vertex)
++                except ValueError:
++                    print(f"Invalid vertex data: {line.strip()}")
++            elif parts[0] == 'f':
++                 try:
++                    face = [int(p.split('/')[1]) for p in parts[1:]]
++                    faces.append(face)
++                 except ValueError:
++                     print(f"Invalid face data: {line.strip()}")
++
++    return np.array(vertices), np.array(faces)
+ 
+ class VideoReader:
+     def __init__(self, filepath):

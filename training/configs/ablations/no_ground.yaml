@@ -1,0 +1,6 @@
+# Loss ablation (paper Table 3): no ground contact losses (foot contact, penetration)
+base: ../gru_smplh.yaml
+name: ablation_no_ground
+loss:
+  foot_contact: 0.0
+  penetration: 0.0

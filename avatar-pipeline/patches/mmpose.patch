@@ -1,0 +1,140 @@
+diff --git a/demo/top_down_img_demo_with_mmdet.py b/demo/top_down_img_demo_with_mmdet.py
+index 227f44b..ec842ab 100644
+--- a/demo/top_down_img_demo_with_mmdet.py
++++ b/demo/top_down_img_demo_with_mmdet.py
+@@ -1,6 +1,9 @@
+ # Copyright (c) OpenMMLab. All rights reserved.
+ import os
++import json
+ import warnings
++import numpy as np
++from tqdm import tqdm
+ from argparse import ArgumentParser
+ 
+ from mmpose.apis import (inference_top_down_pose_model, init_pose_model,
+@@ -47,7 +50,7 @@ def main():
+     parser.add_argument(
+         '--bbox-thr',
+         type=float,
+-        default=0.3,
++        default=0.5,
+         help='Bounding box score threshold')
+     parser.add_argument(
+         '--kpt-thr', type=float, default=0.3, help='Keypoint score threshold')
+@@ -66,8 +69,6 @@ def main():
+ 
+     args = parser.parse_args()
+ 
+-    assert args.show or (args.out_img_root != '')
+-    assert args.img != ''
+     assert args.det_config is not None
+     assert args.det_checkpoint is not None
+ 
+@@ -87,51 +88,63 @@ def main():
+     else:
+         dataset_info = DatasetInfo(dataset_info)
+ 
+-    image_name = os.path.join(args.img_root, args.img)
++    root_dir = os.path.dirname(args.img_root)
++
++    image_files = sorted(os.listdir(os.path.join(root_dir, 'images')))
++    keypoints_list = []
++    for image_file in tqdm(image_files):
++        if image_file.endswith('png'):
++            image_name = os.path.join(root_dir, 'images', image_file)
++
++            # test a single image, the resulting box is (x1, y1, x2, y2)
++            mmdet_results = inference_detector(det_model, image_name)
++
++            # keep the person class bounding boxes.
++            person_results = process_mmdet_results(mmdet_results, args.det_cat_id)
++
++            # test a single image, with a list of bboxes.
++
++            # optional
++            return_heatmap = False
++
++            # e.g. use ('backbone', ) to return backbone feature
++            output_layer_names = None
++
++            pose_results, returned_outputs = inference_top_down_pose_model(
++                pose_model,
++                image_name,
++                person_results,
++                bbox_thr=args.bbox_thr,
++                format='xyxy',
++                dataset=dataset,
++                dataset_info=dataset_info,
++                return_heatmap=return_heatmap,
++                outputs=output_layer_names)
++
++            # os.makedirs(args.out_img_root, exist_ok=True)
++            # print(len(pose_results))
++            #Save only one person
++            keypoints_list.append(pose_results[0]['keypoints'])
++            # out_file = os.path.join(args.out_img_root, f'vis_{image_file}')
++
++            # # show the results
++            # vis_pose_result(
++            #     pose_model,
++            #     image_name,
++            #     pose_results,
++            #     dataset=dataset,
++            #     dataset_info=dataset_info,
++            #     kpt_score_thr=args.kpt_thr,
++            #     radius=args.radius,
++            #     thickness=args.thickness,
++            #     show=args.show,
++            #     out_file=out_file)
++    
++    keypoints = np.zeros((len(keypoints_list), pose_results[0]['keypoints'].shape[0], 3))
++    for i in range(len(keypoints_list)):
++        keypoints[i,:,:] = keypoints_list[i][:,:]
++    np.save(os.path.join(root_dir, 'keypoints_2d.npy'), keypoints)
+ 
+-    # test a single image, the resulting box is (x1, y1, x2, y2)
+-    mmdet_results = inference_detector(det_model, image_name)
+-
+-    # keep the person class bounding boxes.
+-    person_results = process_mmdet_results(mmdet_results, args.det_cat_id)
+-
+-    # test a single image, with a list of bboxes.
+-
+-    # optional
+-    return_heatmap = False
+-
+-    # e.g. use ('backbone', ) to return backbone feature
+-    output_layer_names = None
+-
+-    pose_results, returned_outputs = inference_top_down_pose_model(
+-        pose_model,
+-        image_name,
+-        person_results,
+-        bbox_thr=args.bbox_thr,
+-        format='xyxy',
+-        dataset=dataset,
+-        dataset_info=dataset_info,
+-        return_heatmap=return_heatmap,
+-        outputs=output_layer_names)
+-
+-    if args.out_img_root == '':
+-        out_file = None
+-    else:
+-        os.makedirs(args.out_img_root, exist_ok=True)
+-        out_file = os.path.join(args.out_img_root, f'vis_{args.img}')
+-
+-    # show the results
+-    vis_pose_result(
+-        pose_model,
+-        image_name,
+-        pose_results,
+-        dataset=dataset,
+-        dataset_info=dataset_info,
+-        kpt_score_thr=args.kpt_thr,
+-        radius=args.radius,
+-        thickness=args.thickness,
+-        show=args.show,
+-        out_file=out_file)
+ 
+ 
+ if __name__ == '__main__':

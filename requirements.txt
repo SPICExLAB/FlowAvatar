@@ -1,0 +1,15 @@
+# FlowAvatar dependencies (Python >= 3.10): streaming demo and training
+torch>=2.0
+numpy
+pyyaml
+tqdm
+
+# SMPL-X body model wrapper (MPI-IS, research license - see README); pinned to v2.2.2.0,
+# the last version before the 2025 refactor (needs git)
+human_body_prior @ git+https://github.com/nghorbani/human_body_prior@4c246d8a83ce16d3cff9c79dcf04d81fa440a6bc
+
+# Optional: ONNX export for the on-device (Unity Sentis) configuration
+# pip install onnx onnxruntime onnx-simplifier
+
+# Optional: TensorBoard curves for training runs
+# pip install tensorboard

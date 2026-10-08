@@ -1,0 +1,59 @@
+# FlowAvatar benchmark model (paper Table 2): 3-layer bidirectional GRU,
+# 40-frame windows at 60 fps, trained and evaluated on SMPL+H like prior
+# work (AvatarPoser, AGRoL, HMD-Poser). See training/README.md.
+name: gru_smplh
+
+data:
+  root: data/amass_smplh_60fps  # `python -m training.prepare_data --fps 60` (default --body_model smplh)
+  fps: 60
+  seq_len: 40                   # T, frames per training window
+  repeat: 10                    # windows drawn per sequence per epoch
+  mask_prob:                    # random hand-dropout augmentation (per window)
+    left: 0.2
+    right: 0.2
+    both: 0.2
+
+body_model:                     # forward kinematics inside the model (losses, metrics)
+  file: smplh/neutral/model.npz # relative to body_models/ (or $FLOWAVATAR_BODY_MODELS_DIR)
+  num_betas: 16
+
+model:                          # passed to flowavatar.models.FlowAvatarNetwork
+  hidden_dim: 256
+  num_layers: 3
+  use_lstm: false
+  unified_predictor: true       # single pose decoder, as in the benchmark runs
+
+train:
+  epochs: 400
+  batch_size: 256
+  num_workers: 4
+  val_interval: 10              # evaluate on the test split every N epochs
+  log_interval: 50              # batches between log lines
+  seed: 42
+  multi_gpu: true               # DataParallel over all visible GPUs
+
+optimizer:                      # Adam
+  lr: 0.001
+  betas: [0.9, 0.999]
+  weight_decay: 0.0001
+  eps: 1.0e-6
+
+lr_schedule:
+  warmup_epochs: 1
+  warmup_factor: 0.001
+  decay_epochs: [300]           # x0.1 at epoch 300 (75 % of training)
+  decay_factor: 0.1
+  decay_duration_epochs: 3
+
+loss:                           # weights of Eq. 9; terms with weight 0 are only logged
+  type: l1
+  root_orientation: 1.0
+  local_pose: 5.0
+  global_pose: 1.0
+  joint_position: 1.0
+  acceleration: 0.5
+  velocity: 5.0
+  hand_alignment: 0.5
+  foot_contact: 2.0
+  penetration: 1.0
+  shape: 0.0                    # betas are supervised through the joint-position terms

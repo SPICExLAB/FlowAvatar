@@ -1,0 +1,32 @@
+diff --git a/test_image.py b/test_image.py
+index d1879f6..5d727b6 100644
+--- a/test_image.py
++++ b/test_image.py
+@@ -86,7 +86,7 @@ mean_iou = 0.0
+ for i in range(num_image):
+     image_path = image_list[i]
+     image_name = image_path[image_path.rfind('/')+1:image_path.rfind('.')]
+-    print(i, '/', num_image, image_name)
++    # print(i, '/', num_image, image_name)
+ 
+     with Image.open(image_path) as img:
+         img = img.convert("RGB")
+@@ -102,6 +102,10 @@ for i in range(num_image):
+     # inference
+     pred_alpha, pred_mask = inference.single_inference(model, img, device=device)
+ 
++    #Set threshold == 0.6
++    pred_alpha[pred_alpha>=0.6] = 1.0
++    pred_alpha[pred_alpha<0.6] = 0.0
++
+     # evaluation
+     if args.gt_dir is not None:
+         batch_mad = metric_mad(pred_alpha, gt_alpha)
+@@ -124,5 +128,5 @@ for i in range(num_image):
+     save_path = output_dir + '/' + image_name + '.png'
+     Image.fromarray(((pred_alpha * 255).astype('uint8')), mode='L').save(save_path)
+ 
+-print("Total mean mad ", mean_mad/num_image, " mean mse ", mean_mse/num_image, " mean grad ", \
+-    mean_grad/num_image, " mean conn ", mean_conn/num_image, " mean iou ", mean_iou/num_image)
++# print("Total mean mad ", mean_mad/num_image, " mean mse ", mean_mse/num_image, " mean grad ", \
++#     mean_grad/num_image, " mean conn ", mean_conn/num_image, " mean iou ", mean_iou/num_image)
