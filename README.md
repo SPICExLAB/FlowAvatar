@@ -7,8 +7,7 @@ Chenfeng Gao\*, Taeyoung Yeon\*, Sungheon Park, Vasco Xu, Anish Prabhu, Mar Gonz
 
 *IEEE ISMAR 2026 (IEEE Transactions on Visualization and Computer Graphics)*
 
-Paper (coming soon) · [SPICE Lab](https://spice-lab.org/)
-<!-- Paper link: replace "Paper (coming soon)" with [Paper](URL) once it is online. -->
+[Paper (arXiv)](https://arxiv.org/abs/2610.16277) · [Video](https://youtu.be/BReR50Vc9Vo) · [Project Page](https://spice-lab.org/projects/FlowAvatar/) · [SPICE Lab](https://spice-lab.org/)
 
 ![FlowAvatar: full-body pose, hand and facial expression tracking with a personalized avatar on Meta Quest Pro](docs/teaser.jpg)
 
@@ -98,12 +97,23 @@ paper checkpoints reproduce Tables 2 and 3; see [training/README.md](training/RE
 
 ## Citation
 
-Coming soon.
+```bibtex
+@article{gao2026flowavatar,
+  title={FlowAvatar: Real-Time Full-Body Avatars from Sparse Egocentric Inputs on Consumer XR Devices},
+  author={Gao, Chenfeng and Yeon, Taeyoung and Park, Sungheon and Xu, Vasco and Prabhu, Anish and Gonzalez-Franco, Mar and Ahuja, Karan},
+  journal={arXiv preprint arXiv:2610.16277},
+  year={2026}
+}
+```
 
 ## License
 
-The code is released under the [MIT License](LICENSE). Third-party components keep
-their own licenses ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)); the SMPL-X,
-SMPL+H and SMPL body models, the AMASS dataset and the `human_body_prior` package are
-licensed separately by MPI-IS for non-commercial research and are not covered by this
-license.
+This work is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International License](LICENSE). For commercial use, a separate commercial license is required.
+Please contact kahuja@northwestern.edu at Northwestern University for licensing inquiries.
+
+Third-party components keep their own licenses ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md));
+in particular the files in `avatar-pipeline/patches/` modify third-party projects and are provided
+under the licenses of those projects. The SMPL-X, SMPL+H and SMPL body models, the AMASS dataset
+and the `human_body_prior` package are licensed separately by MPI-IS for non-commercial research
+and are not covered by this license.
